@@ -1,0 +1,4 @@
+onlyBuiltDependencies:
+  - node
+  - sharp
+  - skia-canvas
