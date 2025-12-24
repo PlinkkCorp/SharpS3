@@ -1,4 +1,4 @@
- FROM node:20-slim
+FROM node:20-slim AS builder
 
 RUN apt-get update && apt-get install -y \
     openssl \
@@ -13,16 +13,14 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
+COPY package*.json ./
+
+RUN npm ci
+
 COPY . .
 
-RUN npm install -g pnpm@9.12.3
+RUN npm run build
 
-ENV CI=true
-
-RUN pnpm install
-
-RUN pnpm run build
-
-CMD ["sh", "-c", "pnpm run start"]
+CMD ["sh", "-c", "npm run start"]
 
 EXPOSE 3002
