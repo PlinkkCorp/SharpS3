@@ -1,0 +1,18 @@
+{
+    "compilerOptions": {
+        "noEmitOnError": false,
+        "skipLibCheck": true,
+        "strict": false,
+        "moduleResolution": "node16",
+        "types": ["node"],
+        "lib": ["ES2021"],
+        "module": "node16",
+        "target": "es2022",
+        "outDir": "dist",
+        "rootDir": "src",
+        "esModuleInterop": true,
+        "preserveSymlinks": true
+    },
+    "include": ["src"],
+    "exclude": ["dist"]
+}
