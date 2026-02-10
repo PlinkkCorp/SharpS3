@@ -1,7 +1,7 @@
 import sharp from "sharp";
 import { applyWatermark } from "./utils/watermark";
 
-export const SOURCE_FALLBACKS = ["webp", "png", "jpg", "jpeg"] as const;
+export const SOURCE_FALLBACKS = ["webp", "png", "jpg", "jpeg", "svg", "avif"] as const;
 
 export async function processImage(
   buffer: Buffer<ArrayBufferLike>,
@@ -17,6 +17,11 @@ export async function processImage(
     watermark: boolean
   }
 ) {
+  // SVG is not supported by Sharp, return buffer as-is
+  if (opts.format === "svg") {
+    return buffer;
+  }
+
   let img = sharp(buffer);
 
   if (opts.w || opts.h) {
@@ -30,7 +35,7 @@ export async function processImage(
   if (opts.blur) img = img.blur(opts.blur);
   if (opts.grayscale) img = img.grayscale();
 
-  if (opts.watermark) img = await applyWatermark(img, "Marvideo", { opacity: 0.28, repeat: 12 });
+  if (opts.watermark) img = await applyWatermark(img, "Plinkk", { opacity: 0.28, repeat: 12 });
 
   switch (opts.format) {
     case "webp":
@@ -57,6 +62,8 @@ export function mimeTypeFromFormat(format: string): string {
       return "image/webp";
     case "avif":
       return "image/avif";
+    case "svg":
+      return "image/svg+xml";
     default:
       return "image/jpeg";
   }

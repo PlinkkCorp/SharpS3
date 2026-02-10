@@ -2,10 +2,9 @@ import Fastify from "fastify";
 import { cacheKey, getFromCache, saveToCache } from "./cache";
 import mime from "mime-types";
 import { mimeTypeFromFormat, processImage, SOURCE_FALLBACKS } from "./image";
-import { getImageFromS3, getImageWithFallback } from "./s3";
+import { getImageFromS3, getImageWithFallback, getImageWithFallbackFromGitHub, isS3Available } from "./s3";
 import { ImageFormat } from "./types/image";
 import { extractScale } from "./utils/scale";
-import { isPremiumRequest } from "./utils/premium";
 import("dotenv/config");
 
 const fastify = Fastify({ logger: true });
@@ -20,20 +19,16 @@ function getOutputFormat(path: string): ImageFormat {
   return ext as ImageFormat;
 }
 
-
-fastify.get("/:bucket/*", async (req, rep) => {
-  const bucket = (req.params as any).bucket as string;
+fastify.get("/*", async (req, rep) => {
   const key = (req.params as any)["*"];
 
-  if (!bucket || !key) {
+  if (!key) {
     return rep.code(400).send("Invalid path");
   }
 
   if (key.includes("..")) {
     return rep.code(403).send("Forbidden");
   }
-
-  const premium = isPremiumRequest(req);
 
   const { w, h, quality, blur, grayscale, fit, render } = req.query as {
     w: string;
@@ -42,7 +37,7 @@ fastify.get("/:bucket/*", async (req, rep) => {
     blur: string;
     grayscale: string;
     fit: string;
-    render: string
+    render: string;
   };
 
   const { cleanPath, scale } = extractScale(key);
@@ -57,7 +52,7 @@ fastify.get("/:bucket/*", async (req, rep) => {
     fit,
     scale,
     // watermark: !premium
-    watermark: render !== "raw"
+    watermark: render === "raw"
   };
 
   const cacheId = cacheKey(key + JSON.stringify(options));
@@ -68,8 +63,12 @@ fastify.get("/:bucket/*", async (req, rep) => {
     rep.header("X-Cache", "HIT");
     return rep.send(cached);
   }
-
-  const original = await getImageWithFallback(bucket, cleanPath);
+  let original;
+  if (await isS3Available("plinkk-image")) {
+    original = await getImageWithFallback("plinkk-image", cleanPath);
+  } else {
+    original = await getImageWithFallbackFromGitHub(cleanPath)
+  }
   const output = await processImage(original, options);
 
   await saveToCache(cacheId, output);

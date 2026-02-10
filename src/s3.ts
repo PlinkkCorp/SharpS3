@@ -3,6 +3,7 @@ import { streamToBuffer } from "./streamToBuffer";
 import { Readable } from "stream";
 import mime from "mime-types";
 import { SOURCE_FALLBACKS } from "./image";
+import https from "https";
 
 export function getMimeType(key: string): string {
   return mime.lookup(key) || "application/octet-stream";
@@ -25,6 +26,15 @@ export function getS3Client(): S3 {
     endpoint: "https://s3.marvideo.fr",
     forcePathStyle: true,
   });
+}
+
+export async function isS3Available(bucket: string): Promise<boolean> {
+  try {
+    await getS3Client().headBucket({ Bucket: bucket });
+    return true;
+  } catch (err) {
+    return false;
+  }
 }
 
 export async function getImageWithFallback(
@@ -62,6 +72,44 @@ export async function getImageFromS3(bucket: string, key: string) {
 }
 
 function buildFallbackKeys(path: string): string[] {
-  const base = path.replace(/\.(webp|png|jpe?g)$/i, "");
+  const base = path.replace(/\.(webp|png|jpe?g|svg|avif)$/i, "");
   return SOURCE_FALLBACKS.map(ext => `${base}.${ext}`);
+}
+
+export async function getImageWithFallbackFromGitHub(
+  path: string
+): Promise<Buffer> {
+  const keys = buildFallbackKeys(path);
+
+  for (const key of keys) {
+    try {
+      return await getImageFromGitHub(key);
+    } catch (err: any) {
+      if (err.statusCode === 404) {
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  throw new Error("Image not found in any supported format on GitHub Pages");
+}
+
+export async function getImageFromGitHub(path: string): Promise<Buffer> {
+  const url = `https://plinkkcorp.github.io/assets/${path}`;
+  
+  return new Promise((resolve, reject) => {
+    https.get(url, (res) => {
+      if (res.statusCode && res.statusCode >= 400) {
+        const err = new Error(`HTTP Error ${res.statusCode}`);
+        (err as any).statusCode = res.statusCode;
+        reject(err);
+        return;
+      }
+
+      streamToBuffer(res)
+        .then(resolve)
+        .catch(reject);
+    }).on("error", reject);
+  });
 }
