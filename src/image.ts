@@ -1,4 +1,4 @@
-import sharp from "sharp";
+import sharp, { FitEnum } from "sharp";
 import { applyWatermark } from "./utils/watermark";
 
 export const SOURCE_FALLBACKS = ["webp", "png", "jpg", "jpeg"] as const;
@@ -8,14 +8,14 @@ export async function processImage(
   opts: {
     w: number | undefined;
     h: number | undefined;
-    fit: any | undefined;
+    fit: keyof FitEnum | undefined;
     blur: number | boolean | sharp.BlurOptions | undefined;
     grayscale: boolean | undefined;
     format: string | undefined;
     quality: number | undefined;
     scale: number | undefined;
-    watermark: boolean
-  }
+    watermark?: string;
+  },
 ) {
   let img = sharp(buffer);
 
@@ -24,13 +24,12 @@ export async function processImage(
       width: opts.w,
       height: opts.h,
       fit: opts.fit || "cover",
+      withoutEnlargement: false,
     });
   }
 
   if (opts.blur) img = img.blur(opts.blur);
   if (opts.grayscale) img = img.grayscale();
-
-  if (opts.watermark) img = await applyWatermark(img, "Marvideo", { opacity: 0.28, repeat: 12 });
 
   switch (opts.format) {
     case "webp":
@@ -44,6 +43,10 @@ export async function processImage(
       break;
     default:
       img = img.jpeg({ quality: opts.quality || 80 });
+  }
+
+  if (opts.watermark !== undefined) {
+    img = await applyWatermark(img, opts.watermark, { opacity: 0.28 });
   }
 
   return img.toBuffer();
@@ -60,4 +63,19 @@ export function mimeTypeFromFormat(format: string): string {
     default:
       return "image/jpeg";
   }
+}
+
+export async function getImageFromUrl(url: string): Promise<Buffer> {
+  const res = (await fetch(url)) as any;
+
+  if (res.status < 200 || res.status >= 300) {
+    throw new Error(`Failed to fetch image from URL: ${res.status}`);
+  }
+
+  if (typeof res.buffer === "function") {
+    return await res.buffer();
+  }
+
+  const arrayBuffer = await res.arrayBuffer();
+  return Buffer.from(arrayBuffer);
 }

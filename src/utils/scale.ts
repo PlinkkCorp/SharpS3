@@ -18,3 +18,5 @@ export function resizeForScale(
   if (!baseWidth) return img;
   return img.resize({ width: baseWidth * scale });
 }
+
+export const fitValues = ['contain', 'cover', 'fill', 'inside', 'outside'] as const;
