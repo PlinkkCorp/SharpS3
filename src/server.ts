@@ -1,11 +1,11 @@
 import Fastify, { FastifyRequest } from "fastify";
 import { cacheKey, getFromCache, saveToCache } from "./cache";
-import mime from "mime-types";
 import { getImageFromUrl, mimeTypeFromFormat, processImage } from "./image";
 import { getImageWithFallback } from "./s3";
 import {
   ImageFormat,
   ImageQuerySchema,
+  sharpParams,
   SUPPORTED_FORMATS,
 } from "./types/image";
 import { extractScale } from "./utils/scale";
@@ -14,6 +14,7 @@ import fastifyMultipart from "@fastify/multipart";
 import z, { ZodError } from "zod";
 import rateLimit from "@fastify/rate-limit";
 import sharp from "sharp";
+import os from "os";
 import("dotenv/config");
 
 const fastify = Fastify({ logger: true });
@@ -103,20 +104,39 @@ fastify.get(
 fastify.get(
   "/lnk/*",
   async (req: FastifyRequest<{ Params: { "*": string } }>, rep) => {
-    const { "*": key } = req.params;
+    let wildcard = req.params["*"];
 
-    if (!key) {
+    if (!wildcard) {
       return rep.code(400).send("Invalid path");
     }
 
-    if (key.includes("..")) {
+    if (wildcard.includes("..")) {
       return rep.code(403).send("Forbidden");
     }
 
-    const parsedQuery = ImageQuerySchema.parse(req.query);
-    const premium = isPremiumRequest(req);
+    const rawUrl = req.raw.url || "";
+    const lnkIndex = rawUrl.indexOf("/lnk/");
 
-    const { cleanPath, scale } = extractScale(key);
+    if (lnkIndex === -1) return rep.code(400).send("Malformed internal route");
+
+    let fullTargetUrl = rawUrl.substring(lnkIndex + 5);
+
+    fullTargetUrl = fullTargetUrl.replace(/^"|"$/g, "");
+
+    const parsedTarget = new URL(
+      fullTargetUrl.startsWith("http")
+        ? fullTargetUrl
+        : `https://${fullTargetUrl}`,
+    );
+
+    sharpParams.forEach((param) => parsedTarget.searchParams.delete(param));
+
+    const finalUrlToFetch = parsedTarget.toString();
+
+    const parsedQuery = ImageQuerySchema.parse(req.query);
+    // const premium = isPremiumRequest(req);
+
+    const { cleanPath, scale } = extractScale(parsedTarget.pathname);
     const outputFormat =
       parsedQuery.format || getOutputFormat(cleanPath) || "jpeg";
 
@@ -126,7 +146,7 @@ fastify.get(
       scale,
     };
 
-    const cacheId = cacheKey(key + JSON.stringify(options));
+    const cacheId = cacheKey(finalUrlToFetch + JSON.stringify(options));
     const cached = await getFromCache(cacheId);
 
     if (cached) {
@@ -135,7 +155,23 @@ fastify.get(
       return rep.send(cached);
     }
 
-    const original = await getImageFromUrl(cleanPath);
+    let original: Buffer;
+    try {
+      original = await getImageFromUrl(finalUrlToFetch);
+    } catch (error) {
+      const width = options.w || 600;
+      const height = options.h || 400;
+
+      try {
+        original = await getImageFromUrl(
+          `https://placehold.co/${width}x${height}.png?text=Image%0ANon%20Disponible`,
+        );
+
+        rep.header("X-Image-Fallback", "true");
+      } catch (error) {
+        throw new Error("Image Fallback fail");
+      }
+    }
 
     const output = await processImage(original, options);
 
@@ -237,6 +273,54 @@ fastify.get("/", async (req, rep) => {
   `);
 });
 
+fastify.get("/metrics", async (req, rep) => {
+  const memoryUsage = process.memoryUsage();
+  const freeMemPercentage = (os.freemem() / os.totalmem()) * 100;
+  return {
+    status: "OK",
+    timestamp: new Date().toISOString(),
+
+    container: {
+      id: os.hostname(),
+      platform: os.platform(),
+      architecture: os.arch(),
+      nodeVersion: process.version,
+      cpusCount: os.cpus().length,
+      serviceName: process.env.SWARM_SERVICE_NAME || "unknown",
+      nodeId: process.env.SWARM_NODE_ID || "unknown"
+    },
+
+    perf: {
+      uptimeSeconds: Math.floor(process.uptime()),
+      processMemory: {
+        heapUsedMB: Math.round(memoryUsage.heapUsed / 1024 / 1024),
+        heapTotalMB: Math.round(memoryUsage.heapTotal / 1024 / 1024),
+        rssMB: Math.round(memoryUsage.rss / 1024 / 1024),
+      },
+      systemMemoryFreePercentage: Math.round(freeMemPercentage),
+    },
+
+    sharpCounters: sharp.counters(),
+  };
+});
+
+fastify.post("/warmup", async (req, rep) => {
+  const { bucket, key, targets } = req.body as {
+    bucket: string;
+    key: string;
+    targets: Array<{ w?: number; h?: number; format: string }>;
+  };
+
+  for (const target of targets) {
+    const original = await getImageWithFallback(bucket, key);
+    const output = await processImage(original, target as any);
+    const cacheId = cacheKey(key + JSON.stringify(target));
+    await saveToCache(cacheId, output);
+  }
+
+  return rep.send({ success: true, message: `${targets.length} variantes mises en cache.` });
+});
+
 fastify.setErrorHandler((error, request, reply) => {
   if (error instanceof ZodError) {
     return reply
@@ -247,7 +331,7 @@ fastify.setErrorHandler((error, request, reply) => {
         error: "Bad Request",
         message: "Validation failed",
         details: error.flatten().fieldErrors,
-      })
+      });
   }
   request.log.error(error);
   return reply
@@ -262,4 +346,6 @@ fastify.listen({ port: 3002, host: "0.0.0.0" }, (err, address) => {
   }
   console.info(`Server is now listening on ${address}`);
   sharp.cache(false);
+  sharp.concurrency(2);
+  sharp.simd(true);
 });

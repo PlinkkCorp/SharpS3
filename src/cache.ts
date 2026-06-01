@@ -4,7 +4,7 @@ import crypto from "crypto";
 import("dotenv/config")
 
 const CACHE_DIR = process.env.CACHE_DIR || "./cache";
-const MAX_CACHE_SIZE = Number(process.env.MAX_CACHE_SIZE ?? 1 * 1024 ** 3); // 1 Go
+const MAX_CACHE_SIZE = Number(process.env.MAX_CACHE_SIZE ?? 2 * 1024 ** 3); // 2 Go
 
 export function cacheKey(str: string) {
   return crypto.createHash("sha1").update(str).digest("hex");

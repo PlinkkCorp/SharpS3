@@ -6,14 +6,16 @@ export async function processImage(
   buffer: Buffer<ArrayBufferLike>,
   opts: ImageOptions,
 ) {
-  let img = sharp(buffer);
+  const metadata = await sharp(buffer).metadata();
+
+  let img = sharp(buffer, { animated: metadata.pages && metadata.pages > 1 });
+
+  metadata.comments = [{ keyword: "editedBy", text: "MarvideoIMGProxy"}]
 
   img = img.rotate();
-  
+
   if (opts.placeholder) {
-    img = img
-      .resize({ width: 20 })
-      .blur(5);
+    img = img.resize({ width: 20 }).blur(5);
   } else if (opts.w || opts.h) {
     img = img.resize({
       width: opts.w,
@@ -24,23 +26,31 @@ export async function processImage(
     });
   }
 
-  if (opts.blur && !opts.placeholder) img = img.blur(opts.blur);  if (opts.grayscale) img = img.grayscale();
+  if (opts.blur && !opts.placeholder) img = img.blur(opts.blur);
+  if (opts.grayscale) img = img.grayscale();
   if (opts.tint) img = img.tint(opts.tint);
   if (opts.negate) img = img.negate();
+  if (opts.flip) img = img.flip();
+  if (opts.flop) img = img.flop();
+  if (opts.rot)
+    img = img.rotate(opts.rot, { background: { r: 0, g: 0, b: 0, alpha: 0 } });
 
-
-  switch (opts.format) {
-    case "webp":
-      img = img.webp({ quality: opts.quality || 80 });
-      break;
-    case "avif":
-      img = img.avif({ quality: opts.quality || 50 });
-      break;
-    case "png":
-      img = img.png();
-      break;
-    default:
-      img = img.jpeg({ quality: opts.quality || 80 });
+  if (opts.format === "gif") {
+    img = img.gif({ loop: 0 });
+  } else {
+    switch (opts.format) {
+      case "webp":
+        img = img.webp({ quality: opts.quality || 80 });
+        break;
+      case "avif":
+        img = img.avif({ quality: opts.quality || 50 });
+        break;
+      case "png":
+        img = img.png();
+        break;
+      default:
+        img = img.jpeg({ quality: opts.quality || 80 });
+    }
   }
 
   if (opts.watermark !== undefined) {
@@ -64,7 +74,9 @@ export function mimeTypeFromFormat(format: string): string {
 }
 
 export async function getImageFromUrl(url: string): Promise<Buffer> {
-  const parsedUrl = new URL(url);
+  const cleanUrl = url.replace(/^"|"$/g, "").trim();
+
+  const parsedUrl = new URL(cleanUrl);
 
   const privateIpRegex =
     /^(localhost|127\.0\.0\.1|192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)/;
@@ -72,8 +84,12 @@ export async function getImageFromUrl(url: string): Promise<Buffer> {
     throw new Error("Forbidden target URL (Private IP)");
   }
 
-  const res = (await fetch(url)) as any;
-  if (!res.ok) throw new Error(`Failed to fetch image: ${res.status}`);
+  const response = await globalThis.fetch(cleanUrl);
+  const res = response as unknown as InstanceType<typeof globalThis.Response>;
+
+  if (!res.ok) {
+    throw new Error(`Failed to fetch image from URL: ${res.status}`);
+  }
 
   const arrayBuffer = await res.arrayBuffer();
   return Buffer.from(arrayBuffer);
