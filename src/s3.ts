@@ -2,7 +2,7 @@ import { S3 } from "@aws-sdk/client-s3";
 import { streamToBuffer } from "./streamToBuffer";
 import { Readable } from "stream";
 import mime from "mime-types";
-import { SOURCE_FALLBACKS } from "./image";
+import { SUPPORTED_FORMATS } from "./types/image";
 
 export function getMimeType(key: string): string {
   return mime.lookup(key) || "application/octet-stream";
@@ -13,7 +13,7 @@ export function getS3Client(): S3 {
   const secretAccessKey = process.env.S3_SECRET_KEY;
 
   if (!accessKeyId || !secretAccessKey) {
-    throw new Error("AWS credentials are not defined");
+    throw new Error("S3 credentials are not defined");
   }
 
   return new S3({
@@ -63,5 +63,5 @@ export async function getImageFromS3(bucket: string, key: string) {
 
 function buildFallbackKeys(path: string): string[] {
   const base = path.replace(/\.(webp|png|jpe?g)$/i, "");
-  return SOURCE_FALLBACKS.map(ext => `${base}.${ext}`);
+  return SUPPORTED_FORMATS.map(ext => `${base}.${ext}`);
 }

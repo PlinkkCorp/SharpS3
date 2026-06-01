@@ -1,35 +1,33 @@
 import sharp, { FitEnum } from "sharp";
 import { applyWatermark } from "./utils/watermark";
-
-export const SOURCE_FALLBACKS = ["webp", "png", "jpg", "jpeg"] as const;
+import { ImageOptions } from "./types/image";
 
 export async function processImage(
   buffer: Buffer<ArrayBufferLike>,
-  opts: {
-    w: number | undefined;
-    h: number | undefined;
-    fit: keyof FitEnum | undefined;
-    blur: number | boolean | sharp.BlurOptions | undefined;
-    grayscale: boolean | undefined;
-    format: string | undefined;
-    quality: number | undefined;
-    scale: number | undefined;
-    watermark?: string;
-  },
+  opts: ImageOptions,
 ) {
   let img = sharp(buffer);
 
-  if (opts.w || opts.h) {
+  img = img.rotate();
+  
+  if (opts.placeholder) {
+    img = img
+      .resize({ width: 20 })
+      .blur(5);
+  } else if (opts.w || opts.h) {
     img = img.resize({
       width: opts.w,
       height: opts.h,
-      fit: opts.fit || "cover",
+      fit: opts.fit,
+      position: opts.strategy || "center",
       withoutEnlargement: false,
     });
   }
 
-  if (opts.blur) img = img.blur(opts.blur);
-  if (opts.grayscale) img = img.grayscale();
+  if (opts.blur && !opts.placeholder) img = img.blur(opts.blur);  if (opts.grayscale) img = img.grayscale();
+  if (opts.tint) img = img.tint(opts.tint);
+  if (opts.negate) img = img.negate();
+
 
   switch (opts.format) {
     case "webp":
@@ -66,15 +64,16 @@ export function mimeTypeFromFormat(format: string): string {
 }
 
 export async function getImageFromUrl(url: string): Promise<Buffer> {
+  const parsedUrl = new URL(url);
+
+  const privateIpRegex =
+    /^(localhost|127\.0\.0\.1|192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)/;
+  if (privateIpRegex.test(parsedUrl.hostname)) {
+    throw new Error("Forbidden target URL (Private IP)");
+  }
+
   const res = (await fetch(url)) as any;
-
-  if (res.status < 200 || res.status >= 300) {
-    throw new Error(`Failed to fetch image from URL: ${res.status}`);
-  }
-
-  if (typeof res.buffer === "function") {
-    return await res.buffer();
-  }
+  if (!res.ok) throw new Error(`Failed to fetch image: ${res.status}`);
 
   const arrayBuffer = await res.arrayBuffer();
   return Buffer.from(arrayBuffer);
