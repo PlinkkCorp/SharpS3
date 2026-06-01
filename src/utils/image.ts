@@ -13,7 +13,7 @@ export async function processImage(
   img = img.rotate();
 
   if (opts.placeholder) {
-    img = img.resize({ width: 20 }).blur(5);
+    img = img.resize({ width: Math.round(metadata.width * 0.30) }).blur(2);
   } else if (opts.w || opts.h) {
     img = img.resize({
       width: opts.w,
