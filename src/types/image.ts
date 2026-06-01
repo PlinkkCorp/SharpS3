@@ -23,24 +23,21 @@ export const ImageQuerySchema = z.object({
     .string()
     .optional()
     .transform((val) => (val ? parseInt(val, 10) : undefined))
-    .pipe(z.number().positive().optional()),
+    .pipe(z.number().positive().max(2000).optional()),
+
   h: z
     .string()
     .optional()
     .transform((val) => (val ? parseInt(val, 10) : undefined))
-    .pipe(z.number().positive().optional()),
+    .pipe(z.number().positive().max(2000).optional()),
 
   fit: z.enum(FIT_VALUES).default("cover"),
 
   blur: z
     .string()
     .optional()
-    .transform((val) => {
-      if (val === undefined) return undefined;
-      if (val === "true" || val === "") return true;
-      const num = parseFloat(val);
-      return isNaN(num) ? undefined : num;
-    }),
+    .transform((val) => (val ? parseFloat(val) : undefined))
+    .pipe(z.number().positive().min(0.3).max(1000).optional()),
 
   grayscale: z
     .string()

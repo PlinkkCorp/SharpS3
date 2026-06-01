@@ -1,7 +1,7 @@
 import Fastify, { FastifyRequest } from "fastify";
-import { cacheKey, getFromCache, saveToCache } from "./cache";
-import { getImageFromUrl, mimeTypeFromFormat, processImage } from "./image";
-import { getImageWithFallback } from "./s3";
+import { cacheKey, getFromCache, saveToCache } from "./utils/cache";
+import { getImageFromUrl, mimeTypeFromFormat, processImage } from "./utils/image";
+import { getImageWithFallback } from "./utils/s3";
 import {
   ImageFormat,
   ImageQuerySchema,
@@ -15,6 +15,7 @@ import z, { ZodError } from "zod";
 import rateLimit from "@fastify/rate-limit";
 import sharp from "sharp";
 import os from "os";
+import { redis } from "./utils/redis";
 import("dotenv/config");
 
 const fastify = Fastify({ logger: true });
@@ -36,9 +37,11 @@ fastify.register(fastifyMultipart, {
 });
 
 fastify.register(rateLimit, {
+  global: true,
   max: 50,
   timeWindow: "1 minute",
   hook: "preParsing",
+  redis: redis,
   keyGenerator: (req) => {
     return req.ip;
   },
@@ -223,7 +226,7 @@ fastify.get("/", async (req, rep) => {
     <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>SharpS3 — API de Traitement d'Images</title>
+      <title>MarvideoIMGProxy</title>
       <style>
         :root { --bg: #0f172a; --card: #1e293b; --text: #f8fafc; --accent: #38bdf8; }
         body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 2rem; }
@@ -239,7 +242,7 @@ fastify.get("/", async (req, rep) => {
       </style>
     </head>
     <body>
-      <h1>🖼️ SharpS3 Image Optimizer</h1>
+      <h1>MarvideoIMGProxy</h1>
       <p>Service de traitement et d'optimisation d'images à la volée propulsé par Fastify & Sharp.</p>
 
       <h2>📍 Endpoints disponibles</h2>
@@ -247,6 +250,7 @@ fastify.get("/", async (req, rep) => {
         <li><span class="endpoint">GET</span> <code>/s3/:bucket/*</code> — Traiter une image depuis le stockage S3</li>
         <li><span class="endpoint">GET</span> <code>/lnk/*</code> — Traiter une image distante depuis une URL absolue</li>
         <li><span class="endpoint">POST</span> <code>/upload</code> — Envoyer un fichier image à traiter (Multipart)</li>
+        <li><span class="endpoint" style="color: #ef4444;">DELETE</span><code>/cache</code> — Vide l'intégralité du cache Redis (Nécessite le header <code>X-Purge-Token</code>)</li>
       </ul>
 
       <h2>⚙️ Paramètres de Requête (Query Params)</h2>
@@ -279,6 +283,11 @@ fastify.get("/metrics", async (req, rep) => {
   return {
     status: "OK",
     timestamp: new Date().toISOString(),
+
+    redis: {
+      connected: redis.status === "ready",
+      host: redis.options.host,
+    },
 
     container: {
       id: os.hostname(),
@@ -319,6 +328,46 @@ fastify.post("/warmup", async (req, rep) => {
   }
 
   return rep.send({ success: true, message: `${targets.length} variantes mises en cache.` });
+});
+
+fastify.delete("/cache", async (req, rep) => {
+  const secretToken = process.env.CACHE_PURGE_TOKEN || "hkgnkhjlvgdvùtdc";
+  const authHeader = req.headers["x-purge-token"];
+
+  if (!authHeader || authHeader !== secretToken) {
+    return rep.status(401).send({
+      statusCode: 401,
+      error: "Unauthorized",
+      message: "Jeton de purge invalide ou manquant dans les en-têtes (X-Purge-Token)."
+    });
+  }
+
+  try {
+    const keys = await redis.keys("img:*");
+
+    if (keys.length === 0) {
+      return rep.send({
+        success: true,
+        message: "Le cache est déjà vide.",
+        clearedCount: 0
+      });
+    }
+
+    await redis.del(...keys);
+
+    return rep.send({
+      success: true,
+      message: "Le cache de MarvideoIMGProxy a été entièrement vidé.",
+      clearedCount: keys.length
+    });
+  } catch (error) {
+    req.log.error(error);
+    return rep.status(500).send({
+      statusCode: 500,
+      error: "Internal Server Error",
+      message: "Impossible de vider le cache Redis."
+    });
+  }
 });
 
 fastify.setErrorHandler((error, request, reply) => {
