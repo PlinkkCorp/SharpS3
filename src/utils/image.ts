@@ -13,7 +13,7 @@ export async function processImage(
   img = img.rotate();
 
   if (opts.placeholder) {
-    img = img.resize({ width: Math.round(metadata.width * 0.30) }).blur(2);
+    img = img.resize({ width: Math.round(metadata.width * 0.3) }).blur(2);
   } else if (opts.w || opts.h) {
     img = img.resize({
       width: opts.w,
@@ -89,19 +89,43 @@ export async function getImageFromUrl(url: string): Promise<Buffer> {
 
   const parsedUrl = new URL(cleanUrl);
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 2000);
+
   const privateIpRegex =
     /^(localhost|127\.0\.0\.1|192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)/;
   if (privateIpRegex.test(parsedUrl.hostname)) {
     throw new Error("Forbidden target URL (Private IP)");
   }
 
-  const response = await globalThis.fetch(cleanUrl);
-  const res = response as unknown as InstanceType<typeof globalThis.Response>;
+  try {
+    const response = (await globalThis.fetch(cleanUrl, {
+      signal: controller.signal,
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Connection: "keep-alive",
+        Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+        "Accept-Encoding": "gzip, deflate, br",
+      },
+    })) as unknown as InstanceType<typeof globalThis.Response>;
+    clearTimeout(timeoutId);
 
-  if (!res.ok) {
-    throw new Error(`Failed to fetch image from URL: ${res.status}`);
+    if (!response.ok) {
+      throw new Error(
+        `Erreur HTTP Distante : ${response.status} ${response.statusText}`,
+      );
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    return Buffer.from(arrayBuffer);
+  } catch (error) {
+    clearTimeout(timeoutId);
+    if (error.name === "AbortError") {
+      throw new Error(
+        "Le serveur distant a mis trop de temps à répondre (Timeout 2s).",
+      );
+    }
+    throw error;
   }
-
-  const arrayBuffer = await res.arrayBuffer();
-  return Buffer.from(arrayBuffer);
 }
