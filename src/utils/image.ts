@@ -1,16 +1,46 @@
 import sharp, { FitEnum } from "sharp";
 import { applyWatermark } from "./watermark";
-import { ImageOptions } from "../types/image";
+import { ImageOptions, InvalidImageOperationError } from "../types/image";
 
 export async function processImage(
   buffer: Buffer<ArrayBufferLike>,
   opts: ImageOptions,
 ) {
   const metadata = await sharp(buffer).metadata();
+  const imgWidth = metadata.width || 0;
+  const imgHeight = metadata.height || 0;
 
   let img = sharp(buffer, { animated: metadata.pages && metadata.pages > 1 });
 
-  img = img.rotate();
+  img = img.autoOrient().rotate();
+
+  if (opts.extract) {
+    const { top, left, width, height } = opts.extract;
+
+    const isOutOfBounds = 
+      left < 0 || 
+      top < 0 || 
+      width <= 0 || 
+      height <= 0 || 
+      (left + width) > imgWidth || 
+      (top + height) > imgHeight;
+
+    if (isOutOfBounds) {
+      throw new InvalidImageOperationError(
+        `Zone d'extraction invalide. L'image d'origine fait ${imgWidth}x${imgHeight}px. ` +
+        `La zone demandée (${left + width}x${top + height}px) dépasse des limites.`
+      );
+    }
+
+    img = img.extract(opts.extract);
+  }
+
+  if (opts.trim !== undefined) {
+    img = img.trim({
+      threshold: opts.trim,
+      background: opts.trimBg ? `#${opts.trimBg}` : undefined
+    });
+  }
 
   if (opts.placeholder) {
     img = img.resize({ width: Math.round(metadata.width * 0.3) }).blur(2);
@@ -24,10 +54,30 @@ export async function processImage(
     });
   }
 
+  if (opts.extend) {
+    const background = opts.extendBg ? `#${opts.extendBg}` : { r: 0, g: 0, b: 0, alpha: 0 };
+    img = img.extend({
+      top: opts.extend,
+      bottom: opts.extend,
+      left: opts.extend,
+      right: opts.extend,
+      background
+    });
+  }
+
+  if (opts.modulate) {
+    img = img.modulate({
+      brightness: opts.modulate.brightness || 1,
+      saturation: opts.modulate.saturation || 1,
+      hue: opts.modulate.hue || 0,
+    });
+  }
+
   if (opts.blur && !opts.placeholder) img = img.blur(opts.blur);
   if (opts.grayscale) img = img.grayscale();
   if (opts.tint) img = img.tint(opts.tint);
   if (opts.negate) img = img.negate();
+  if (opts.linear) img = img.linear(opts.linear.a, opts.linear.b);
   if (opts.flip) img = img.flip();
   if (opts.flop) img = img.flop();
   if (opts.rot)
