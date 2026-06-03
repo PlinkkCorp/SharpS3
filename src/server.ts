@@ -29,18 +29,17 @@ const fastify = Fastify({ logger: true, trustProxy: false });
 async function bootstrap() {
   try {
     await fastify.register(rateLimit, {
-      global: true,
+      global: false,
       max: 10,
       timeWindow: "1 minute",
       redis: redis,
       keyGenerator: (req) => {
-        const ip =
+        return (
           req.ip ||
           req.headers["x-forwarded-for"]?.toString() ||
           req.raw.socket.remoteAddress ||
-          "anonymous";
-        console.log(`➔ [RATE LIMIT] Incrémentation pour la clé : ${ip}`);
-        return ip;
+          "anonymous"
+        );
       },
       errorResponseBuilder: (req, context) => {
         return {
@@ -94,6 +93,40 @@ async function bootstrap() {
 
     fastify.get(
       "/s3/:bucket/*",
+      {
+        preHandler: async (
+          request: FastifyRequest<{ Params: { bucket: string; "*": string } }>,
+          reply,
+        ) => {
+          const { bucket, "*": key } = request.params;
+          const options = ImageQuerySchema.parse(request.query);
+          const cacheId = cacheKey(key + JSON.stringify(options));
+
+          const hasCache = await redis.exists(cacheId);
+
+          if (hasCache === 1) {
+            (request as any).cacheKey = cacheId;
+            return;
+          }
+
+          try {
+            await fastify.rateLimit.call(fastify, {
+              max: 10,
+              timeWindow: "1 minute",
+              keyGenerator: (req) => {
+                return (
+                  req.ip ||
+                  req.headers["x-forwarded-for"]?.toString() ||
+                  req.raw.socket.remoteAddress ||
+                  "anonymous"
+                );
+              },
+            })(request, reply);
+          } catch (err) {
+            throw err;
+          }
+        },
+      },
       async (
         req: FastifyRequest<{ Params: { bucket: string; "*": string } }>,
         rep,
@@ -120,7 +153,8 @@ async function bootstrap() {
           scale,
         };
 
-        const cacheId = cacheKey(key + JSON.stringify(options));
+        const cacheId =
+          (req as any).cacheKey || cacheKey(key + JSON.stringify(options));
         const cached = await getFromCache(cacheId);
 
         if (cached) {
@@ -144,6 +178,79 @@ async function bootstrap() {
 
     fastify.get(
       "/lnk/*",
+      {
+        preHandler: async (request, reply) => {
+          let wildcard = request.params["*"];
+
+          if (!wildcard) {
+            return reply.code(400).send("Invalid path");
+          }
+
+          if (wildcard.includes("..")) {
+            return reply.code(403).send("Forbidden");
+          }
+
+          const rawUrl = request.raw.url || "";
+          const lnkIndex = rawUrl.indexOf("/lnk/");
+
+          if (lnkIndex === -1)
+            return reply.code(400).send("Malformed internal route");
+
+          let fullTargetUrl = rawUrl.substring(lnkIndex + 5);
+
+          fullTargetUrl = fullTargetUrl.replace(/^"|"$/g, "");
+
+          const parsedTarget = new URL(
+            fullTargetUrl.startsWith("http")
+              ? fullTargetUrl
+              : `https://${fullTargetUrl}`,
+          );
+          const parsedQuery = ImageQuerySchema.parse(request.query);
+
+          const { cleanPath, scale } = extractScale(parsedTarget.pathname);
+          const outputFormat =
+            parsedQuery.format || getOutputFormat(cleanPath) || "jpeg";
+
+          const options = {
+            ...parsedQuery,
+            format: outputFormat,
+            scale,
+          };
+
+          sharpParams.forEach((param) =>
+            parsedTarget.searchParams.delete(param),
+          );
+
+          const finalUrlToFetch = parsedTarget.toString();
+          const key = cacheKey(
+            finalUrlToFetch + JSON.stringify(options),
+          );
+
+          const hasCache = await redis.exists(key);
+
+          if (hasCache === 1) {
+            (request as any).cacheKey = key;
+            return;
+          }
+
+          try {
+            await fastify.rateLimit.call(fastify, {
+              max: 10,
+              timeWindow: "1 minute",
+              keyGenerator: (req) => {
+                return (
+                  req.ip ||
+                  req.headers["x-forwarded-for"]?.toString() ||
+                  req.raw.socket.remoteAddress ||
+                  "anonymous"
+                );
+              },
+            })(request, reply);
+          } catch (err) {
+            throw err;
+          }
+        },
+      },
       async (req: FastifyRequest<{ Params: { "*": string } }>, rep) => {
         let wildcard = req.params["*"];
 
@@ -188,7 +295,9 @@ async function bootstrap() {
           scale,
         };
 
-        const cacheId = cacheKey(finalUrlToFetch + JSON.stringify(options));
+        const cacheId =
+          (req as any).cacheKey ||
+          cacheKey(finalUrlToFetch + JSON.stringify(options));
         const cached = await getFromCache(cacheId);
 
         if (cached) {
@@ -227,36 +336,59 @@ async function bootstrap() {
       },
     );
 
-    fastify.post("/upload", async (req, rep) => {
-      const data = await req.file();
+    fastify.post(
+      "/upload",
+      {
+        preHandler: async (request, reply) => {
+          try {
+            await fastify.rateLimit.call(fastify, {
+              max: 10,
+              timeWindow: "1 minute",
+              keyGenerator: (req) => {
+                return (
+                  req.ip ||
+                  req.headers["x-forwarded-for"]?.toString() ||
+                  req.raw.socket.remoteAddress ||
+                  "anonymous"
+                );
+              },
+            })(request, reply);
+          } catch (err) {
+            throw err;
+          }
+        },
+      },
+      async (req, rep) => {
+        const data = await req.file();
 
-      if (!data) {
-        return rep.code(400).send("No file uploaded");
-      }
+        if (!data) {
+          return rep.code(400).send("No file uploaded");
+        }
 
-      const originalBuffer = await data.toBuffer();
+        const originalBuffer = await data.toBuffer();
 
-      const inputFormat = data.mimetype.split("/")[1] || "jpeg";
+        const inputFormat = data.mimetype.split("/")[1] || "jpeg";
 
-      const parsedQuery = ImageQuerySchema.parse(req.query);
+        const parsedQuery = ImageQuerySchema.parse(req.query);
 
-      const outputFormat =
-        parsedQuery.format ||
-        z.enum(SUPPORTED_FORMATS).optional().parse(inputFormat);
+        const outputFormat =
+          parsedQuery.format ||
+          z.enum(SUPPORTED_FORMATS).optional().parse(inputFormat);
 
-      const options = {
-        ...parsedQuery,
-        format: outputFormat,
-        scale: 1,
-      };
+        const options = {
+          ...parsedQuery,
+          format: outputFormat,
+          scale: 1,
+        };
 
-      const output = await processImage(originalBuffer, options);
+        const output = await processImage(originalBuffer, options);
 
-      rep.header("Content-Type", mimeTypeFromFormat(outputFormat));
-      rep.header("Cache-Control", "no-store, must-revalidate");
+        rep.header("Content-Type", mimeTypeFromFormat(outputFormat));
+        rep.header("Cache-Control", "no-store, must-revalidate");
 
-      return rep.send(output);
-    });
+        return rep.send(output);
+      },
+    );
 
     fastify.get("/", async (req, rep) => {
       rep.type("text/html").send(`
@@ -413,7 +545,6 @@ async function bootstrap() {
       }
     });
 
-    const port = 3002;
     fastify.listen({ port: 3002, host: "0.0.0.0" }, (err, address) => {
       if (err) {
         fastify.log.error(err);
@@ -424,7 +555,7 @@ async function bootstrap() {
       sharp.concurrency(2);
       sharp.simd(true);
     });
-    console.log(`🚀 Serveur démarré et protégé sur le port ${port}`);
+    console.log(`Serveur démarré et protégé sur le port 3002`);
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);
