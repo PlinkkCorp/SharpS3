@@ -8,6 +8,7 @@ export const SUPPORTED_FORMATS = [
   "jpg",
   "gif",
 ] as const;
+
 export const FIT_VALUES = [
   "contain",
   "cover",
