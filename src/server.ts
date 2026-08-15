@@ -110,7 +110,6 @@ async function bootstrap() {
 
           const decodedKey = decodeURIComponent(key);
           if (decodedKey.split("/").some((segment) => segment === "..")) {
-            console.log(decodedKey)
             return reply.code(403).send("Forbidden");
           }
 
@@ -151,7 +150,6 @@ async function bootstrap() {
 
         const decodedKey = decodeURIComponent(key);
         if (decodedKey.split("/").some((segment) => segment === "..")) {
-          console.log(decodedKey)
           return rep.code(403).send("Forbidden");
         }
 
