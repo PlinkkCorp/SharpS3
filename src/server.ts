@@ -101,10 +101,16 @@ async function bootstrap() {
       "/plinkk-image/*",
       {
         preHandler: async (
-          request: FastifyRequest<{ Params: { bucket: string; "*": string } }>,
+          request: FastifyRequest<{ Params: { "*": string } }>,
           reply,
         ) => {
-          const { bucket, "*": key } = request.params;
+          const { "*": key } = request.params;
+
+          const decodedKey = decodeURIComponent(key);
+          if (decodedKey.split("/").some((segment) => segment === "..")) {
+            return reply.code(403).send("Forbidden");
+          }
+
           const options = ImageQuerySchema.parse(request.query);
           const cacheId = cacheKey(key + JSON.stringify(options));
 
@@ -140,16 +146,20 @@ async function bootstrap() {
           return rep.code(400).send("Invalid path");
         }
 
-        if (key.includes("..")) {
+        const decodedKey = decodeURIComponent(key);
+        if (decodedKey.split("/").some((segment) => segment === "..")) {
           return rep.code(403).send("Forbidden");
         }
 
         const parsedQuery = ImageQuerySchema.parse(req.query);
-        const premium = isPremiumRequest(req);
 
         const { cleanPath, scale } = extractScale(key);
-        const outputFormat =
-          parsedQuery.format || getOutputFormat(cleanPath) || "jpeg";
+        let outputFormat: ImageFormat = "jpeg";
+        try {
+          outputFormat = parsedQuery.format || getOutputFormat(cleanPath) || "jpeg";
+        } catch (e) {
+          outputFormat = "webp";
+        }
         const options = {
           ...parsedQuery,
           format: outputFormat,
