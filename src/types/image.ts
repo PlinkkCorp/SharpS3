@@ -7,6 +7,7 @@ export const SUPPORTED_FORMATS = [
   "jpeg",
   "jpg",
   "gif",
+  "svg"
 ] as const;
 
 export const FIT_VALUES = [

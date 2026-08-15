@@ -129,6 +129,8 @@ export function mimeTypeFromFormat(format: string): string {
       return "image/webp";
     case "avif":
       return "image/avif";
+    case "svg":
+      return 'image/svg+xml'
     default:
       return "image/jpeg";
   }

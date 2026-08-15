@@ -154,7 +154,7 @@ async function bootstrap() {
         const parsedQuery = ImageQuerySchema.parse(req.query);
 
         const { cleanPath, scale } = extractScale(key);
-        let outputFormat: ImageFormat = "jpeg";
+        let outputFormat: ImageFormat = "webp";
         try {
           outputFormat = parsedQuery.format || getOutputFormat(cleanPath) || "jpeg";
         } catch (e) {
@@ -177,7 +177,13 @@ async function bootstrap() {
         }
 
         const original = await getImageWithFallback("plinkk-image", cleanPath);
-        const output = await processImage(original, options);
+        let output: Buffer<ArrayBufferLike>
+
+        if (outputFormat === "svg") {
+          output = original
+        } else {
+          output = await processImage(original, options);
+        }
 
         await saveToCache(cacheId, output);
 
