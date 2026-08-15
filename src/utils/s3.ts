@@ -29,22 +29,29 @@ export function getS3Client(): S3 {
 
 export async function getImageWithFallback(
   bucket: string,
-  path: string
+  path: string,
 ): Promise<Buffer> {
-  const keys = buildFallbackKeys(path);
+  const cleanKey = path.startsWith("/") ? path.slice(1) : path;
+  const keys = buildFallbackKeys(cleanKey);
 
   for (const key of keys) {
     try {
       return await getImageFromS3(bucket, key);
     } catch (err: any) {
-      if (err.name === "NoSuchKey" || err.$metadata?.httpStatusCode === 404) {
+      if (
+        err.name === "NoSuchKey" ||
+        err.name === "NotFound" ||
+        err.name === "AccessDenied" ||
+        err.$metadata?.httpStatusCode === 404 ||
+        err.$metadata?.httpStatusCode === 403
+      ) {
         continue;
       }
       throw err;
     }
   }
 
-  throw new Error("Image not found in any supported format");
+  throw new Error("Image not found in any supported format for:" + cleanKey);
 }
 
 export async function getImageFromS3(bucket: string, key: string) {
@@ -57,11 +64,15 @@ export async function getImageFromS3(bucket: string, key: string) {
     throw new Error("S3 object body is empty");
   }
 
-
   return streamToBuffer(res.Body as Readable);
 }
 
 function buildFallbackKeys(path: string): string[] {
+  const set = new Set<string>([path]);
   const base = path.replace(/\.(webp|png|jpe?g|svg)$/i, "");
-  return SUPPORTED_FORMATS.map(ext => `${base}.${ext}`);
+  for (const ext of SUPPORTED_FORMATS) {
+    set.add(`${base}.${ext}`);
+  }
+
+  return Array.from(set);
 }
