@@ -22,9 +22,10 @@ import rateLimit from "@fastify/rate-limit";
 import sharp from "sharp";
 import os from "os";
 import { redis } from "./utils/redis";
+import fastifyCors from "@fastify/cors";
 import("dotenv/config");
 
-const fastify = Fastify({ logger: true, trustProxy: false });
+const fastify = Fastify({ logger: true });
 
 async function bootstrap() {
   try {
@@ -54,6 +55,11 @@ async function bootstrap() {
       limits: {
         fileSize: 10 * 1024 * 1024,
       },
+    });
+
+    await fastify.register(fastifyCors, {
+      origin: "*",
+      methods: ["GET"],
     });
 
     fastify.setErrorHandler((error, request, reply) => {
@@ -127,10 +133,7 @@ async function bootstrap() {
           }
         },
       },
-      async (
-        req: FastifyRequest<{ Params: { "*": string } }>,
-        rep,
-      ) => {
+      async (req: FastifyRequest<{ Params: { "*": string } }>, rep) => {
         const { "*": key } = req.params;
 
         if (!key) {
@@ -222,9 +225,7 @@ async function bootstrap() {
           );
 
           const finalUrlToFetch = parsedTarget.toString();
-          const key = cacheKey(
-            finalUrlToFetch + JSON.stringify(options),
-          );
+          const key = cacheKey(finalUrlToFetch + JSON.stringify(options));
 
           const hasCache = await redis.exists(key);
 
