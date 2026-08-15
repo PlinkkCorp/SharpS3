@@ -128,12 +128,12 @@ async function bootstrap() {
         },
       },
       async (
-        req: FastifyRequest<{ Params: { bucket: string; "*": string } }>,
+        req: FastifyRequest<{ Params: { "*": string } }>,
         rep,
       ) => {
-        const { bucket, "*": key } = req.params;
+        const { "*": key } = req.params;
 
-        if (!bucket || !key) {
+        if (!key) {
           return rep.code(400).send("Invalid path");
         }
 
@@ -163,7 +163,7 @@ async function bootstrap() {
           return rep.send(cached);
         }
 
-        const original = await getImageWithFallback(bucket, cleanPath);
+        const original = await getImageWithFallback("plinkk-image", cleanPath);
         const output = await processImage(original, options);
 
         await saveToCache(cacheId, output);
