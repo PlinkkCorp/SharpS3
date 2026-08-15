@@ -31,7 +31,7 @@ async function bootstrap() {
   try {
     await fastify.register(rateLimit, {
       global: false,
-      max: 10,
+      max: 100,
       timeWindow: "1 minute",
       redis: redis,
       keyGenerator: (req) => {
@@ -106,8 +106,11 @@ async function bootstrap() {
         ) => {
           const { "*": key } = request.params;
 
+          if (!key) return reply.code(400).send("Forbidden");
+
           const decodedKey = decodeURIComponent(key);
           if (decodedKey.split("/").some((segment) => segment === "..")) {
+            console.log(decodedKey)
             return reply.code(403).send("Forbidden");
           }
 
@@ -123,7 +126,7 @@ async function bootstrap() {
 
           try {
             await fastify.rateLimit.call(fastify, {
-              max: 10,
+              max: 100,
               timeWindow: "1 minute",
               keyGenerator: (req) => {
                 return (
@@ -148,6 +151,7 @@ async function bootstrap() {
 
         const decodedKey = decodeURIComponent(key);
         if (decodedKey.split("/").some((segment) => segment === "..")) {
+          console.log(decodedKey)
           return rep.code(403).send("Forbidden");
         }
 
@@ -156,7 +160,7 @@ async function bootstrap() {
         const { cleanPath, scale } = extractScale(key);
         let outputFormat: ImageFormat = "webp";
         try {
-          outputFormat = parsedQuery.format || getOutputFormat(cleanPath) || "jpeg";
+          outputFormat = parsedQuery.format || getOutputFormat(cleanPath) || "webp";
         } catch (e) {
           outputFormat = "webp";
         }
