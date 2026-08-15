@@ -168,6 +168,8 @@ async function bootstrap() {
           scale,
         };
 
+        console.log("kk",key)
+
         const cacheId =
           (req as any).cacheKey || cacheKey(key + JSON.stringify(options));
         const cached = await getFromCache(cacheId);

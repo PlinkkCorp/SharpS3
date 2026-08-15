@@ -35,7 +35,6 @@ export async function getImageWithFallback(
   const keys = buildFallbackKeys(cleanKey);
 
   for (const key of keys) {
-    console.log("key : ", bucket, key)
     try {
       return await getImageFromS3(bucket, key);
     } catch (err: any) {
