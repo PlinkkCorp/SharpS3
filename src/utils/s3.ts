@@ -62,6 +62,6 @@ export async function getImageFromS3(bucket: string, key: string) {
 }
 
 function buildFallbackKeys(path: string): string[] {
-  const base = path.replace(/\.(webp|png|jpe?g)$/i, "");
+  const base = path.replace(/\.(webp|png|jpe?g|svg)$/i, "");
   return SUPPORTED_FORMATS.map(ext => `${base}.${ext}`);
 }
