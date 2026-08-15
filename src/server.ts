@@ -92,7 +92,7 @@ async function bootstrap() {
     });
 
     fastify.get(
-      "/s3/:bucket/*",
+      "/plinkk-image/*",
       {
         preHandler: async (
           request: FastifyRequest<{ Params: { bucket: string; "*": string } }>,
